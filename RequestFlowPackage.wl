@@ -42,8 +42,8 @@ validRequestTimeDistributionsQ[numberOfProducts_, requestTimeDistributions_List]
 
 
 validRequestFlowQ[numberOfProducts_, saleHorizon_, requestFlow: {{_, _}..}] := And[
-  ContainsOnly[requestFlow[[All,2]], Range@numberOfProducts],
-  AllTrue[requestFlow[[All,1]], IntervalMemberQ[Interval[{0, saleHorizon}], #]&]
+  ContainsOnly[requestFlow[[All, 2]], Range@numberOfProducts],
+  AllTrue[requestFlow[[All, 1]], IntervalMemberQ[Interval[{0, saleHorizon}], #]&]
 ]
 
 
@@ -61,7 +61,7 @@ writeRequestFlow[numberOfProducts_, saleHorizon_, requestFlow_] := CompoundExpre
 (*Main functionals*)
 
 
-RequestFlow[numberOfRequests_, requestTimeDistributions_] := Null
+RequestFlow[numberOfRequests_, requestTimeDistributions_] := SortBy[First]@Flatten[MapIndexed[Thread[{#, First@#2}]&, MapThread[RandomVariate, {requestTimeDistributions, numberOfRequests}]],1]
 
 RequestFlow[numberOfProducts_Integer?Positive, saleHorizon_Integer?Positive, numberOfRequests_, requestTimeDistributions_] /; validRequestTimeDistributionsQ[
   numberOfProducts, 
