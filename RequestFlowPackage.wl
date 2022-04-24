@@ -61,7 +61,7 @@ writeRequestFlow[numberOfProducts_, saleHorizon_, requestFlow_] := CompoundExpre
 (*Main functionals*)
 
 
-RequestFlow[numberOfRequests_, requestTimeDistributions_] := SortBy[First]@Flatten[MapIndexed[Thread[{#, First@#2}]&, MapThread[RandomVariate, {requestTimeDistributions, numberOfRequests}]],1]
+RequestFlow[numberOfRequests_, requestTimeDistributions_] := SortBy[First]@Flatten[MapIndexed[Thread[{#, First@#2}]&, MapThread[RandomVariate, {requestTimeDistributions, numberOfRequests}]], 1]
 
 RequestFlow[numberOfProducts_Integer?Positive, saleHorizon_Integer?Positive, numberOfRequests_, requestTimeDistributions_] /; validRequestTimeDistributionsQ[
   numberOfProducts, 
