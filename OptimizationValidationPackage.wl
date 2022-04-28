@@ -27,10 +27,6 @@ rlpReadContext
 Begin["Private`"]
 
 
-(* ::Text:: *)
-(*Auxiliary functions*)
-
-
 dlpValidateNumberOfProducts::argx = "numberOfProducts is not valid. The number must be a positive integer. Got `1`";
 
 dlpValidateNumberOfProducts[numberOfProducts_Integer?Positive] := numberOfProducts

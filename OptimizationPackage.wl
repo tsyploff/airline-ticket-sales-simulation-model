@@ -26,8 +26,8 @@ Needs["OptimizationValidationPackage`"]
 
 
 dlpRoundModel[context_, lowerBound: {__?NonNegative}, upperBound: {__?NonNegative}] /; And[
-  Length@lowerBound==context["numberOfProducts"],
-  Length@upperBound==context["numberOfProducts"]
+  Length@lowerBound == context["numberOfProducts"],
+  Length@upperBound == context["numberOfProducts"]
 ] := Module[
   {lowerBoundConstraint, upperBoundConstraint, capacityConstraint, target = -context["fares"]},
   
@@ -62,7 +62,7 @@ pnlpFindBookingLimits[context_] := Module[
   {ctx = rlpReadContext@context, x, vars, target, constraints},
   vars = Array[x, context["numberOfProducts"]];
   target = context["fares"].MapThread[Mean@TruncatedDistribution[{-\[Infinity], #}, #2]&, {vars, context["demand"]}];
-  constraints=Join[
+  constraints = Join[
     Thread[context["membershipMatrix"].vars <= context["capacity"]],
     Thread[vars <= Mean/@context["demand"]],
     Thread[vars >= 0]
