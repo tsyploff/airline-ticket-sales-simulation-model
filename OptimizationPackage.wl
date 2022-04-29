@@ -7,7 +7,8 @@ BeginPackage["OptimizationPackage`"]
 (*Functions and constants declaration, documentation*)
 
 
-
+FindBookingLimits
+Model
 
 
 (* ::Text:: *)
@@ -17,117 +18,77 @@ BeginPackage["OptimizationPackage`"]
 Begin["Private`"]
 
 
+Needs["OptimizationValidationPackage`"]
+
+
 (* ::Text:: *)
 (*Auxiliary functions*)
 
 
-dlpValidateNumberOfProducts::argx = "numberOfProducts is not valid. The number must be a positive integer. Got `1`";
-
-dlpValidateNumberOfProducts[numberOfProducts_Integer?Positive] := numberOfProducts
-
-dlpValidateNumberOfProducts[numberOfProducts_] := CompoundExpression[
-  Message[dlpValidateNumberOfProducts::argx, numberOfProducts], 
-  HoldForm[dlpValidateNumberOfProducts[numberOfProducts]]
+dlpRoundModel[context_, lowerBound: {__?NonNegative}, upperBound: {__?NonNegative}] /; And[
+  Length@lowerBound == context["numberOfProducts"],
+  Length@upperBound == context["numberOfProducts"]
+] := Module[
+  {lowerBoundConstraint, upperBoundConstraint, capacityConstraint, target = -context["fares"]},
+  
+  capacityConstraint = {-context["membershipMatrix"], context["capacity"]};
+  upperBoundConstraint = {-IdentityMatrix[context["numberOfProducts"]], upperBound};
+  lowerBoundConstraint = {IdentityMatrix[context["numberOfProducts"]], -lowerBound};
+  
+  {target, Join[capacityConstraint, upperBoundConstraint, lowerBoundConstraint, 2]}
 ]
 
 
-dlpValidateNumberOfFlights::argx = "numberOfFlights is not valid. The number must be a positive integer. Got `1`";
+Clear[dlpModel]
+dlpModel[context_] := dlpRoundModel[context, ConstantArray[0, context["numberOfProducts"]], context["demand"]]
 
-dlpValidateNumberOfFlights[numberOfFlights_Integer?Positive] := numberOfFlights
 
-dlpValidateNumberOfFlights[numberOfFlights_] := CompoundExpression[
-  Message[dlpValidateNumberOfFlights::argx, numberOfFlights],
-  HoldForm[dlpValidateNumberOfFlights[numberOfFlights]]
+dlpFindBookingLimits[context_] := dlpValidResult[context["numberOfProducts"], LinearOptimization@@dlpModel@dlpReadContext@context]
+
+
+dlpRoundBookingLimits[context_, bookingLimits_] := dlpValidResult[
+  context["numberOfProducts"],
+  LinearOptimization@@dlpRoundModel[context, Floor@bookingLimits, Ceiling@bookingLimits]
 ]
 
 
-dlpValidateMembershipMatrix::argx = "membershipMatrix is not valid. Must be matrix of size `1`\[Times]`2` of 1 and 0. Got `3`";
+rlpExperiment[context_] := dlpFindBookingLimits@ReplacePart[context, "demand" -> Map[RandomVariate, context["demand"]]]
 
-dlpValidateMembershipMatrix[numberOfProducts_, numberOfFlights_, membershipMatrix_] /; And[
-  Dimensions@membershipMatrix == {numberOfFlights, numberOfProducts},
-  ContainsOnly[Flatten@membershipMatrix, {0, 1}]
-] := membershipMatrix
 
-dlpValidateMembershipMatrix[numberOfProducts_, numberOfFlights_, membershipMatrix_] := CompoundExpression[
-  Message[dlpValidateMembershipMatrix::argx, numberOfFlights, numberOfProducts, membershipMatrix],
-  HoldForm[dlpValidateMembershipMatrix[numberOfProducts, numberOfFlights, membershipMatrix]]
+rlpFindBookingLimits[context_] := With[{ctx = rlpReadContext@context}, Mean@Table[rlpExperiment@ctx, ctx["numberOfExperiments"]]]
+
+
+pnlpFindBookingLimits[context_] := Module[
+  {ctx = rlpReadContext@context, x, vars, target, constraints},
+  vars = Array[x, context["numberOfProducts"]];
+  target = context["fares"].MapThread[Mean@TruncatedDistribution[{-\[Infinity], #}, #2]&, {vars, context["demand"]}];
+  constraints = Join[
+    Thread[context["membershipMatrix"].vars <= context["capacity"]],
+    Thread[vars <= Mean/@context["demand"]],
+    Thread[vars >= 0]
+  ];
+  NMaximize[{target, constraints}, vars][[-1, All, -1]]
 ]
 
 
-dlpValidateFares::argx = "fares is not valid. Must be list of positive integers of length `1`. Got `2`";
+(* ::Text:: *)
+(*Main function*)
 
-dlpValidateFares[numberOfProducts_, fares: {__Integer?Positive}] /; Length@fares == numberOfProducts := fares
 
-dlpValidateFares[numberOfProducts_, fares_] := CompoundExpression[
-  Message[dlpValidateFares::argx, numberOfProducts, fares],
-  HoldForm[dlpValidateFares[numberOfProducts, fares]]
+FindBookingLimits::option="Wrong model. Could be DLP, PNLP, Round PNLP, RLP or Round RLP. Got `1`";
+
+FindBookingLimits[context_, OptionsPattern[{Model -> "DLP"}]] := With[
+  {model = OptionValue[Model]}, 
+  Which[
+    model == "DLP", dlpFindBookingLimits@context,
+    model == "PNLP", pnlpFindBookingLimits@context,
+    model == "Round PNLP", dlpRoundBookingLimits[context, pnlpFindBookingLimits@context],
+    model == "RLP", rlpFindBookingLimits@context,
+    model == "Round RLP", dlpRoundBookingLimits[context, rlpFindBookingLimits@context],
+    True, Message[FindBookingLimits::option, model];
+    HoldForm@FindBookingLimits[context, Model -> model]
+  ]
 ]
-
-
-dlpValidateDemand::argx = "demand is not valid. Must be list of positive integers or a list of distributions of length `1` or a multivariate distribution . Got `2`";
-
-dlpValidateDemand[numberOfProducts_, demand: {__?Positive}] /; Length@demand == numberOfProducts := demand
-
-dlpValidateDemand[numberOfProducts_, demand: {__?DistributionParameterQ}] := dlpValidateDemand[numberOfProducts, Mean/@demand]
-
-dlpValidateDemand[numberOfProducts_, demand_?DistributionParameterQ] := dlpValidateDemand[numberOfProducts, Mean@demand]
-
-dlpValidateDemand[numberOfProducts_, demand_] := CompoundExpression[
-  Message[dlpValidateDemand::argx, numberOfProducts, demand],
-  HoldForm[dlpValidateDemand[numberOfProducts, demand]]
-]
-
-
-dlpValidateCapacity::argx = "capacity is not valid. Must be list of positive integers of length `1`. Got `2`";
-
-dlpValidateCapacity[numberOfFlights_, capacity: {__Integer?Positive}] /; Length@capacity == numberOfFlights := capacity
-
-dlpValidateCapacity[numberOfFlights_, capacity_] := CompoundExpression[
-  Message[dlpValidateCapacity::argx, numberOfFlights, capacity],
-  HoldForm[dlpValidateCapacity[numberOfFlights, capacity]]
-]
-
-
-dlpReadContext[context_] /; ContainsAll[Keys@context, {"numberOfProducts", "numberOfFlights", "membershipMatrix", "fares", "demand", "capacity"}] := <|
-  "numberOfProducts" -> dlpValidateNumberOfProducts@context["numberOfProducts"],
-  "numberOfFlights" -> dlpValidateNumberOfFlights@context["numberOfFlights"],
-  "membershipMatrix" -> dlpValidateMembershipMatrix[context["numberOfProducts"], context["numberOfFlights"], context["membershipMatrix"]], 
-  "fares" -> dlpValidateFares[context["numberOfProducts"], context["fares"]],
-  "demand" -> dlpValidateDemand[context["numberOfProducts"], context["demand"]],
-  "capacity" -> dlpValidateCapacity[context["numberOfFlights"], context["capacity"]]
-|>
-
-
-dlpValidResult::argx = "bookingLimits is not valid. Must be list of positive integers of length `1`. Got `2`";
-
-dlpValidResult[numberOfProducts_, bookingLimits: {__Integer?Positive}] /; Length@bookingLimits == numberOfProducts := bookingLimits
-
-dlpValidResult[numberOfProducts_, bookingLimits_] := CompoundExpression[
-  Message[dlpValidResult::argx, numberOfProducts, bookingLimits],
-  HoldForm[dlpValidResult[numberOfProducts, bookingLimits]]
-]
-
-
-rlpValidateDemand::argx = "demand is not valid. Must be list of distributions of length `1` or a multivariate distribution . Got `2`";
-
-rlpValidateDemand[numberOfProducts_, demand: {__?DistributionParameterQ}] /; Length@demand == numberOfProducts := demand
-
-rlpValidateDemand[numberOfProducts_, demand_?DistributionParameterQ] := demand
-
-rlpValidateDemand[numberOfProducts_, demand_] := CompoundExpression[
-  Message[rlpValidateDemand::argx, numberOfProducts, demand],
-  HoldForm[rlpValidateDemand[numberOfProducts, demand]]
-]
-
-
-rlpReadContext[context_] /; ContainsAll[Keys@context, {"numberOfProducts", "numberOfFlights", "membershipMatrix", "fares", "demand", "capacity"}] := <|
-  "numberOfProducts" -> dlpValidateNumberOfProducts@context["numberOfProducts"],
-  "numberOfFlights" -> dlpValidateNumberOfFlights@context["numberOfFlights"],
-  "membershipMatrix" -> dlpValidateMembershipMatrix[context["numberOfProducts"], context["numberOfFlights"], context["membershipMatrix"]],
-  "fares" -> dlpValidateFares[context["numberOfProducts"], context["fares"]],
-  "demand" -> rlpValidateDemand[context["numberOfProducts"], context["demand"]],
-  "capacity" -> dlpValidateCapacity[context["numberOfFlights"], context["capacity"]]
-|>
 
 
 End[]
