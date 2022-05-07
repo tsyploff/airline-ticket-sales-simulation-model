@@ -22,6 +22,65 @@ Needs["OptimizationValidationPackage`"]
 
 
 (* ::Text:: *)
+(*EMSR functions*)
+
+
+littleWood[{distribution_?DistributionParameterQ, f1_?Positive}, f2_?Positive] := NSolve[f1(1 - CDF[distribution, b]) == f2,b ][[-1, -1, -1]]
+
+
+metaFareClass[distributions: {__?DistributionParameterQ}, fares: {__Integer?Positive}] /; And[
+  Length[distributions] == Length[fares],
+  OrderedQ@Reverse@fares
+] := Module[
+  {x, vars},
+  vars = Array[x, Length@fares];
+  {TransformedDistribution[Total@vars,MapThread[Distributed,{vars,distributions}]],
+  fares.Normalize[Mean/@distributions, Total]}
+]
+
+
+emsr[distributions: {__?DistributionParameterQ}, fares:{__Integer?Positive}, capacity_Integer?Positive] /; And[
+  Length[distributions]==Length[fares],
+  OrderedQ@Reverse@fares
+] := Append[Floor@Table[littleWood[metaFareClass[Take[distributions, i], Take[fares, i]], fares[[i + 1]]], {i, Length@fares - 1}], capacity]
+
+
+dlpFindShadowPrices[context_]:=With[
+  {
+    model = dlpModel@OptimizationValidationPackage`dlpReadContext@context,
+    n = context["numberOfProducts"],
+    m = context["numberOfFlights"]
+  },
+  LinearOptimization[model[[1]], model[[2]], "DualMaximizer"][[1, m + 1;;m + n]]
+]
+
+
+pricesUp[prices: {__Integer}] := prices - Min[prices] + 1
+
+
+protectionLevelsToBookingLimits[protectionLevels_] := protectionLevelsToBookingLimits[protectionLevels, Last@protectionLevels]
+protectionLevelsToBookingLimits[protectionLevels_, capacity_] := Prepend[Most[capacity - protectionLevels], capacity]
+
+
+emsrFindBookingLimitsStep[context_, flightProducts_, shadowPrices_, i_]:=Module[
+  {flight, prices, protectionLevels, bookingLimits},
+  flight = flightProducts[[i]];
+  prices = ReverseSortBy[{flight, pricesUp[shadowPrices[[flight]]]}\[Transpose], Last];
+  protectionLevels = Clip[#, {0, Last@#}]&@emsr[context["demand"][[flight]], prices[[All, 2]], context["capacity"][[i]]];
+  bookingLimits = protectionLevelsToBookingLimits@protectionLevels;
+  ReplacePart[ConstantArray[0, context["numberOfProducts"]], Thread[flight -> bookingLimits]]
+]
+
+
+emsrFindBookingLimits[context_] := Module[
+  {flightProducts, shadowPrices},
+  shadowPrices = dlpFindShadowPrices@context;
+  flightProducts = Pick[Range[context["numberOfProducts"]], #, 1]&/@context["membershipMatrix"];
+  Max/@Transpose@Table[emsrFindBookingLimitsStep[context, flightProducts, shadowPrices, i], {i, context["numberOfFlights"]}]
+]
+
+
+(* ::Text:: *)
 (*Auxiliary functions*)
 
 
@@ -85,6 +144,7 @@ FindBookingLimits[context_, OptionsPattern[{Model -> "DLP"}]] := With[
     model == "Round PNLP", dlpRoundBookingLimits[context, pnlpFindBookingLimits@context],
     model == "RLP", rlpFindBookingLimits@context,
     model == "Round RLP", dlpRoundBookingLimits[context, rlpFindBookingLimits@context],
+    model == "EMSR", emsrFindBookingLimits@context,
     True, Message[FindBookingLimits::option, model];
     HoldForm@FindBookingLimits[context, Model -> model]
   ]
